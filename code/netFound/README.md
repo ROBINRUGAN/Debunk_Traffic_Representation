@@ -55,6 +55,20 @@ python3 scripts/preprocess_data.py --input_folder folder_name --action finetune 
 - You can **manually edit the `"labels"` column** for **custom class adjustments** (including regression tasks).
 - As default validation data split does not shuffle the data file before the split, if your data is not shuffled, please use `scripts/shuffler.py` to shuffle the train file to ensure that the resulting test file contains instances of different classes.
 
+## Installation way by ourselves
+```
+conda create -n netfound python=3.10
+conda activate netfound
+pip install -U scikit-learn
+pip install datasets psutil tensorboard torchinfo
+pip install torch==2.1.1 torchvision==0.16.1 torchaudio==2.1.1 
+--index-url https://download.pytorch.org/whl/cu118
+pip install "numpy<2"
+pip install transformers==4.51.3
+pip install "accelerate>=0.26.0"
+conda env update --file environment.yml --prune 
+```
+
 ## Finetuning netFound
 ```
 python src/train/NetfoundFinetuning.py \
