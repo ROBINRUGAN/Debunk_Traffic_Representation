@@ -18,7 +18,7 @@ The `code` folder includes the following baseline algorithms:
 - [netFound](https://github.com/SNL-UCSB/netFound)
 - [AutoGluon](https://auto.gluon.ai/stable/index.html) based Feature Engineering
 
-You can follow the installation instructions provided in the repositories to set up and test the environment. When reproducing results, we adhered to the official installation guides of each \textbf{classifier and} repository. If any conflicts arise between our instructions and the official guides, please prioritize the official documentation, as discrepancies are likely due to differences in environment configuration.
+You can follow the installation instructions provided in the repositories to set up and test the environment. When reproducing results, we adhered to the official installation guides of each classifier and repository. If any conflicts arise between our instructions and the official guides, please prioritize the official documentation, as discrepancies are likely due to differences in environment configuration.
 
 **Many thanks to authors for contributions.**
 
