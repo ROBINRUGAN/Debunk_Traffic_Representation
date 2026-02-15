@@ -1,6 +1,7 @@
 import shutil
 import os
 import json
+import logging
 import pandas as pd
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -10,6 +11,17 @@ from accelerate.utils import ProjectConfiguration
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 from pathlib import Path
+
+
+class _DeletingCheckpointFilter(logging.Filter):
+    """过滤 accelerate 的 "Deleting N checkpoints to make room for new checkpoint." """
+
+    def filter(self, record):
+        try:
+            msg = record.getMessage()
+            return "Deleting" not in msg or "make room for new checkpoint" not in msg
+        except Exception:
+            return True
 
 
 class ExperimentLogger:
@@ -306,7 +318,14 @@ class TrainingExperimentLogger(ExperimentLogger):
         else:
             last_epoch, last_step = 0, 0
         if last_epoch != epoch_id or last_step != batch_id:
-            self.accelerator.save_state()  # Checkpoint location is chosen automatically
+            # 临时过滤 accelerate 的 "Deleting N checkpoints to make room for new checkpoint."
+            _acc_log = logging.getLogger("accelerate.accelerator")
+            _filter = _DeletingCheckpointFilter()
+            _acc_log.addFilter(_filter)
+            try:
+                self.accelerator.save_state()  # Checkpoint location is chosen automatically
+            finally:
+                _acc_log.removeFilter(_filter)
             with open(self.training_checkpoint_file, "w+", encoding="utf-8") as f:
                 checkpoint = {
                     "epochs": epoch_id,
@@ -329,8 +348,7 @@ class TrainingExperimentLogger(ExperimentLogger):
                 f"{self.path_best_model}/weights.pth",
             )
         elif type == "custom_encoder":
-            torch.save(
-                unwrapped_model.state_dict(),
-                f"{self.path_best_encoder}/weights.pth",
-            )
+            # 克隆 state_dict 避免共享张量导致保存时报错/警告
+            state = {k: v.cpu().clone() for k, v in unwrapped_model.state_dict().items()}
+            torch.save(state, f"{self.path_best_encoder}/weights.pth")
         

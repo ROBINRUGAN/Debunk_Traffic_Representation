@@ -1,0 +1,30 @@
+Traceback (most recent call last):
+  File "/home/gxy/llm-network/Debunk_Traffic_Representation/code/PCAP_encoder/Experiments/5_classification_training/../../2.Training/classification/classification.py", line 52, in <module>
+    run(get_classification_options())
+  File "/home/gxy/llm-network/Debunk_Traffic_Representation/code/PCAP_encoder/Experiments/5_classification_training/../../2.Training/classification/classification.py", line 43, in run
+    model_obj.run(logger, opts)
+  File "/home/gxy/llm-network/Debunk_Traffic_Representation/code/PCAP_encoder/Experiments/5_classification_training/../../Core/classes/classification_model.py", line 93, in run
+    self.train_model(logger)
+  File "/home/gxy/llm-network/Debunk_Traffic_Representation/code/PCAP_encoder/Experiments/5_classification_training/../../Core/classes/classification_model.py", line 197, in train_model
+    self.start_training(
+  File "/home/gxy/llm-network/Debunk_Traffic_Representation/code/PCAP_encoder/Experiments/5_classification_training/../../Core/classes/classification_model.py", line 245, in start_training
+    self.training_batch(
+  File "/home/gxy/llm-network/Debunk_Traffic_Representation/code/PCAP_encoder/Experiments/5_classification_training/../../Core/classes/classification_model.py", line 377, in training_batch
+    logger.save_checkpoint(
+  File "/home/gxy/llm-network/Debunk_Traffic_Representation/code/PCAP_encoder/Experiments/5_classification_training/../../Core/classes/logger.py", line 309, in save_checkpoint
+    self.accelerator.save_state()  # Checkpoint location is chosen automatically
+  File "/home/gxy/miniconda3/envs/pcapencoder/lib/python3.10/site-packages/accelerate/accelerator.py", line 3194, in save_state
+    save_location = save_accelerator_state(
+  File "/home/gxy/miniconda3/envs/pcapencoder/lib/python3.10/site-packages/accelerate/checkpointing.py", line 108, in save_accelerator_state
+    save(state, output_model_file, save_on_each_node=save_on_each_node, safe_serialization=safe_serialization)
+  File "/home/gxy/miniconda3/envs/pcapencoder/lib/python3.10/site-packages/accelerate/utils/other.py", line 215, in save
+    save_func(obj, f)
+  File "/home/gxy/miniconda3/envs/pcapencoder/lib/python3.10/site-packages/safetensors/torch.py", line 286, in save_file
+    serialize_file(_flatten(tensors), filename, metadata=metadata)
+  File "/home/gxy/miniconda3/envs/pcapencoder/lib/python3.10/site-packages/safetensors/torch.py", line 488, in _flatten
+    raise RuntimeError(
+RuntimeError: 
+            Some tensors share memory, this will lead to duplicate memory on disk and potential differences when loading them again: [{'lm_head.weight', 'encoder.embed_tokens.weight'}].
+            A potential way to correctly save your model is to use `save_model`.
+            More information at https://huggingface.co/docs/safetensors/torch_shared_tensors
+            

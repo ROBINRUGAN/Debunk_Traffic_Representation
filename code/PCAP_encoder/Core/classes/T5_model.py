@@ -329,7 +329,11 @@ class T5_PCAP_translator:
             batch_losses.append(gathered_loss)
             step += 1
         if WANDB and logger.accelerator.is_local_main_process:
-            wandb.log({"loss_train": sum(batch_losses) / len(batch_losses)})
+            train_loss = sum(batch_losses) / len(batch_losses)
+            # 多卡时为 (n_gpu,) tensor，需压成标量再 log
+            if train_loss.numel() > 1:
+                train_loss = train_loss.mean()
+            wandb.log({"loss_train": train_loss.item()})
         return batch_losses
 
     def validation_batch(self, model, validation_dataloader, logger, checkpoint_id):
@@ -357,7 +361,9 @@ class T5_PCAP_translator:
                 loss = loss_fct(logits, batch["labels"].view(-1))
                 gathered_loss = post_process(logger.accelerator.gather(loss))
                 gathered_loss = reshape_loss(gathered_loss)
-                val_losses.append(loss.item())
+                # 多卡时 gathered_loss 为 (n_gpu,)，需压成标量再 append
+                gl = gathered_loss.mean() if gathered_loss.numel() > 1 else gathered_loss
+                val_losses.append(gl.item())
                 self.compute_accuracy(
                     output_ids.cpu(), batch["labels"].cpu(), step.cpu()
                 )
@@ -418,7 +424,8 @@ class T5_PCAP_translator:
                 loss = loss_fct(logits, batch["labels"].view(-1))
                 gathered_loss = post_process(logger.accelerator.gather(loss))
                 gathered_loss = reshape_loss(gathered_loss)
-                test_loss.append(loss)
+                gl = gathered_loss.mean() if gathered_loss.numel() > 1 else gathered_loss
+                test_loss.append(gl.item())
                 progress_bar.update(1)
                 ### PERFORMANCE EVALUATION
                 self.compute_accuracy(

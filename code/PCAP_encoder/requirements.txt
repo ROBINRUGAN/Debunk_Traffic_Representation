@@ -1,0 +1,25 @@
+# PCAP_encoder 依赖（.venv 用）
+# 若需 GPU：先安装 CUDA 版 torch，例如:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu118
+# 再安装本文件其余依赖
+
+# 转换脚本 mix_pcap_to_parquet + 预处理
+scapy>=2.5.0
+pandas>=2.0
+pyarrow>=14.0
+
+# 分类/训练核心
+torch>=2.0
+transformers>=4.39
+accelerate>=0.25
+scikit-learn>=1.3
+numpy>=1.24
+
+# 训练与日志
+tqdm>=4.65
+wandb>=0.15
+tensorboard>=2.14
+
+# 其他
+safetensors>=0.4
+huggingface-hub>=0.20

@@ -1,0 +1,26 @@
+# 与 code/PCAP_encoder/environment.yml 中 pip 部分对应，供 .venv 使用
+# environment.yml 是 Conda 用的，不能直接用于 venv；本文件为 pip 等价依赖。
+
+# 先安装带 CUDA 的 PyTorch（按需二选一）:
+#   GPU (CUDA 11.8): pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+#   CPU:             pip install torch torchvision torchaudio
+# 再安装本文件: pip install -r requirements.txt
+
+accelerate>=1.5
+pandas>=2.2
+pyarrow>=19
+transformers>=4.39
+scikit-learn>=1.6
+numpy>=1.26
+tensorboard>=2.19
+tqdm>=4.67
+wandb>=0.19
+safetensors>=0.5
+huggingface-hub>=0.29
+scipy>=1.15
+pyyaml>=6.0
+regex>=2024.11
+requests>=2.32
+tokenizers>=0.15
+# 转换脚本与预处理需要
+scapy>=2.5

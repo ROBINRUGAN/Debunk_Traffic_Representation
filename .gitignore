@@ -17,9 +17,18 @@
 **/figures/
 **/results/
 
-# model
+# model & weights (keep code only for git push; backup separately for full restore)
 **/*.bin
 **/*.pth
+**/*.safetensors
+**/*.ot
+**/*.h5
+**/*.msgpack
+**/models/
+**/checkpoints/
+**/.processed_cache/
+*.parquet
+*.pkl
 
 # specific files
 pipeline/

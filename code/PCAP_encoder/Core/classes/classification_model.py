@@ -1,4 +1,5 @@
 import torch
+import torch.distributed as dist
 import wandb
 import json
 from contextlib import nullcontext
@@ -30,6 +31,7 @@ os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 CHECKPOINT_PATIENCE = 500
 CHECKPOINT_X_EPOCH = 1
+PRINT_LOSS_EVERY_STEPS = 100  # 每 N 步在终端打印一次当前段内 avg train loss（约 3000 步/epoch 时每 epoch 约 30 次）
 GENERATION_IN_VALIDATION = True
 WANDB = False
 
@@ -54,6 +56,7 @@ class Classification_model:
         self.prediction = torch.Tensor()
         self.actual = torch.Tensor()
         self.dict_pkt_repr = {}
+        self.pkt_repr_tensor = None  # 多卡时 epoch 0 后合并的全局表示，epoch>=1 使用
         self.custom_model = None
 
 
@@ -249,11 +252,33 @@ class Classification_model:
                 progress_bar=training_progress_bar,
                 checkpoint_steps=checkpoint_steps,
             )
+            if epoch_id == 0 and self.fix_encoder:
+                self._merge_dict_pkt_repr(logger)
         training_val_time = time.time() - training_val_time
-        with open(f"./evaluation/{self.current_experiment}.json", "a") as results_file:
-            json.dump({"total_loop":training_val_time}, results_file)
-            results_file.write("\n")
+        if logger.accelerator.is_main_process:
+            os.makedirs("./evaluation", exist_ok=True)
+            with open(f"./evaluation/{self.current_experiment}.json", "a") as results_file:
+                json.dump({"total_loop": training_val_time}, results_file)
+                results_file.write("\n")
         logger.accelerator.wait_for_everyone()
+
+    def _merge_dict_pkt_repr(self, logger):
+        """多卡 fix_encoder 时：epoch 0 后合并各 rank 的 dict_pkt_repr，供 epoch>=1 使用。
+        注意：DataLoader 用的是 train_data.index / data.index，不是 0..len-1，故 size 按索引上界来。"""
+        if not self.dict_pkt_repr:
+            return
+        sample = next(iter(self.dict_pkt_repr.values()))
+        repr_dim = sample.numel()
+        dtype, device = sample.dtype, self.device
+        local_max_idx = max((int(i) for i in self.dict_pkt_repr.keys()), default=-1)
+        global_max_t = torch.tensor([local_max_idx], device=device, dtype=torch.long)
+        dist.all_reduce(global_max_t, op=dist.ReduceOp.MAX)
+        size_total = global_max_t.item() + 1
+        full_repr = torch.zeros(size_total, repr_dim, dtype=dtype, device=device)
+        for idx, t in self.dict_pkt_repr.items():
+            full_repr[int(idx)] = t.to(device, non_blocking=True)
+        dist.all_reduce(full_repr, op=dist.ReduceOp.SUM)
+        self.pkt_repr_tensor = full_repr
 
     def training_batch(
         self,
@@ -288,7 +313,7 @@ class Classification_model:
                     epoch_id=epoch_id
                 )
                 val_time = time.time() - val_time
-                self.send_data_wandb(losses, epoch_id, False, total_train_time=train_time, model_train_time=train_model_time, total_val_time=val_time )
+                self.send_data_wandb(logger, losses, epoch_id, False, total_train_time=train_time, model_train_time=train_model_time, total_val_time=val_time)
                 losses = torch.Tensor(losses)
                 lr_scheduler.step()
                 if logger.accelerator.is_main_process:
@@ -301,6 +326,11 @@ class Classification_model:
                     )
                 if logger.accelerator.is_main_process:
                     self.checkpoint_id += 1
+                    val_loss = torch.mean(losses).item()
+                    val_acc = self.compute_accuracy(self.prediction.int(), self.actual.int()).item()
+                    logger.accelerator.print(
+                        f"[Val] epoch {epoch_id} step {current_step} val_loss={val_loss:.4f} val_acc={val_acc:.4f}"
+                    )
             classification_model.train()
             if not self.fix_encoder:
                 self.custom_model.train()
@@ -329,9 +359,7 @@ class Classification_model:
                             )
 
                 else:
-                    packet_representation = torch.stack(
-                        [self.dict_pkt_repr[int(index)] for index in step_indexes]
-                    )
+                    packet_representation = self.pkt_repr_tensor[step_indexes].to(self.device)
                 model_time = time.time()
                 label_prob, _ = classification_model(packet_representation.to(self.device))
                 ### LOSS COMPUTATION
@@ -352,17 +380,35 @@ class Classification_model:
                     validation_steps=epoch_id,
                 )
             batch_losses.append(gathered_loss)
+            if (
+                logger.accelerator.is_main_process
+                and step > 0
+                and step % PRINT_LOSS_EVERY_STEPS == 0
+            ):
+                avg_train = sum(batch_losses) / len(batch_losses)
+                # 多卡时 avg_train 可能是 (n_gpu,) 的 tensor，先压成标量再 .item()
+                if hasattr(avg_train, "numel") and avg_train.numel() > 1:
+                    avg_train = avg_train.mean().item()
+                elif hasattr(avg_train, "item"):
+                    avg_train = avg_train.item()
+                else:
+                    avg_train = float(avg_train)
+                logger.accelerator.print(
+                    f"[Train] epoch {epoch_id} step {step} avg_loss={avg_train:.4f}"
+                )
             step += 1
         if WANDB:
             wandb.log({"loss_train": sum(batch_losses) / len(batch_losses)})
         return batch_losses
 
-    def validation_batch(self, classification_model, logger, loader, epoch_id=0):
+    def validation_batch(self, classification_model, logger, loader, epoch_id=0, show_progress=False):
         # Evaluation
         val_losses = []
+        # 训练中验证不显示 tqdm，避免与训练进度条混在一起；测试阶段 show_progress=True 显示进度
         progress_bar = tqdm(
             range(len(loader)),
-            disable=not logger.accelerator.is_local_main_process,
+            disable=not (show_progress and logger.accelerator.is_local_main_process),
+            desc="Val" if not show_progress else "Test",
         )
         self.prediction = torch.Tensor()
         self.actual = torch.Tensor()
@@ -390,9 +436,7 @@ class Classification_model:
                             )
 
                 else:
-                    packet_representation = torch.stack(
-                        [self.dict_pkt_repr[int(index)] for index in step_indexes]
-                    )
+                    packet_representation = self.pkt_repr_tensor[step_indexes].to(self.device)
                 time_start = time.time()
                 label_prob, _ = classification_model(packet_representation.to(self.device))
                 if epoch_id == 0:
@@ -400,8 +444,9 @@ class Classification_model:
                 loss = loss_fct(label_prob, batch["label_class"])
                 gathered_loss = post_process(logger.accelerator.gather(loss))
                 gathered_loss = reshape_loss(gathered_loss)
-
-                val_losses.append(gathered_loss.item())
+                # 多卡时 gathered_loss 为 (n_gpu,) 需先压成标量
+                gl = gathered_loss.mean() if gathered_loss.numel() > 1 else gathered_loss
+                val_losses.append(gl.item())
                 self.prediction = torch.cat(
                     (self.prediction, torch.argmax(label_prob.cpu(), 1))
                 )
@@ -412,13 +457,14 @@ class Classification_model:
                 progress_bar.update(1)
         return val_losses, inf_time
 
-    def send_data_wandb(self, losses, epoch, conf_matrix=False, type_res="val", inf_time=None, total_train_time=None, model_train_time=None, total_val_time=None, test_time=None):
+    def send_data_wandb(self, logger, losses, epoch, conf_matrix=False, type_res="val", inf_time=None, total_train_time=None, model_train_time=None, total_val_time=None, test_time=None):
         """
         send_data_wandb
         ---------------
         Sends the data of the experiment to WandB
 
         Args
+            - logger -- 用于多卡时仅主进程写 evaluation 文件
             - losses (list)
             - type_res (string) -- identified if the metrics are for validation or test
             - confusion_matrix (bool) -- if the confusion matrix is needed or not
@@ -466,10 +512,11 @@ class Classification_model:
                 results["test_time"] = test_time
             if conf_matrix:
                 results["conf_matrix"] = confusion_matrix(self.actual.int(), self.prediction.int()).tolist()
-            os.makedirs("./evaluation", exist_ok=True)
-            with open(f"./evaluation/{self.current_experiment}.json", "a") as results_file:
-                json.dump(results, results_file)
-                results_file.write("\n")
+            if logger.accelerator.is_main_process:
+                os.makedirs("./evaluation", exist_ok=True)
+                with open(f"./evaluation/{self.current_experiment}.json", "a") as results_file:
+                    json.dump(results, results_file)
+                    results_file.write("\n")
 
     def test_model(self, logger, opts=None):
         logger.accelerator.print(f"End training...")
@@ -492,9 +539,9 @@ class Classification_model:
         self.custom_model.eval()
         test_time = time.time()
         losses, inf_time = self.validation_batch(
-            self.classification_head, logger, self.test_loader
+            self.classification_head, logger, self.test_loader, show_progress=True
         )
-        self.send_data_wandb(losses, "test", False, "test", inf_time, test_time=time.time()-test_time)
+        self.send_data_wandb(logger, losses, "test", False, "test", inf_time, test_time=time.time()-test_time)
 
     def compute_accuracy(self, prediction, actual):
         correct = torch.eq(prediction, actual).int().sum()
